@@ -1,0 +1,51 @@
+---
+title: "Project_writeup"
+output: html_document
+---
+We load the document and have a look at data
+```{r}
+library(caret)
+library(ggplot2)
+library(doMC)
+registerDoMC(cores = 8)
+set.seed(12345)
+data=read.csv2(file = "data/pml-training.csv", header = T, sep=",", dec=".", na.strings=c("#DIV/0!", "NA"), strip.white=T)
+testing=read.csv2(file = "data/pml-testing.csv", header = T, sep=",", dec=".", na.strings=c("#DIV/0!", "NA"), strip.white=T)
+dim(data)
+```
+There are 159 potential predictor, some of them are present only when the window change (new_window=='yes'), because they are aggregate of other predictor in the time window.
+We create a validation set and a training set splitting the data (70/30)
+```{r}
+data_idx=createDataPartition(data$classe, p=.70, list = F)
+training=data[data_idx,]
+validation=data[-data_idx,]
+```
+Plotting num_window against classe with user_name as color it is clear that the num_window is more than enough to model the data
+```{r echo=F}
+qplot(training$num_window, training$classe,geom=c("jitter","density"),col=training$user_name)
+```
+In fact, training a random forest using only num_window achieves nearly 100% on the validation set.
+```{r echo=1:2}
+#simple_model=train(classe ~ num_window, data = training, method="rf")
+#m=confusionMatrix(validation$classe, predict(simple_model, validation))
+#m$overall
+```
+The problem states that we need to use only sensor data.
+We remove all predictors that do not contain valid values in the test set and other predictors such ad timestamps, user name and so forth.
+```{r}
+predictor_names=names(testing[which(colSums(sapply(testing,is.na))==0)])
+predictor_names=c("classe", predictor_names[9:length(predictor_names)-1])
+length(predictor_names)-1
+new_training=training[,predictor_names]
+new_validation=validation[,predictor_names]
+```
+We choose to use a random forest using the whole set of predictors, we run the parallel version of the algorithm on a mac, using special libraries to speed up processing.
+```{r}
+rf_model=train(classe ~ ., data=new_training, tuneGrid=data.frame(mtry=5), method="parRF")
+rf_model$results
+```
+To measure the out of sample performance of the obtained method we apply it on the validation set
+```{r}
+validation_cf=confusionMatrix(new_validation$classe, predict(rf_model,new_validation))
+validation_cf
+```
